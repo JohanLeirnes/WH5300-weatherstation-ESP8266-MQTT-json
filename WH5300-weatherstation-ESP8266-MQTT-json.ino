@@ -199,7 +199,7 @@ void publishDatarain(float temp,int hum,float wSpeed,float wGust,int dir,int sta
   Serial.println("Luftfuktighet: " + String(hum) + " %");
   Serial.println("Vindhastighet: " + String(wSpeed) + " m/s");
   Serial.println("Vindbyar: " + String(wGust) + "m/s");
-  Serial.println("Akumulerat regn: " + String(rAcum - rAcumold) + " mm");
+  Serial.println("Akumulerat regn: " + String(rAcumpub) + " mm");
   Serial.println("Status bits: " + String(status));
   Serial.println("Vindriktning: " + String(windDirections[dir]));
   }
