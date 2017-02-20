@@ -1,0 +1,34 @@
+sensor:
+  - platform: mqtt
+    state_topic: 'v-station/sensor1'
+    name: "Väderstation temperatur"
+    unit_of_measurement: '°C'
+    value_template: '{{ value_json.temperature }}'
+  - platform: mqtt
+    state_topic: 'v-station/sensor1'
+    name: "Väderstation humidity"
+    unit_of_measurement: '%'
+    value_template: '{{ value_json.humidity }}'
+  - platform: mqtt
+    state_topic: 'v-station/sensor1'
+    name: "Väderstation vindhastighet"
+    unit_of_measurement: 'm/s'
+    value_template: '{{ value_json.wind }}'
+  - platform: mqtt
+    state_topic: 'v-station/sensor1'
+    name: "Väderstation vindbyar"
+    unit_of_measurement: 'm/s'
+    value_template: '{{ value_json.windgust }}'
+  - platform: mqtt
+    state_topic: 'v-station/sensor1'
+    name: "Väderstation vindriktning"
+    value_template: '{{ value_json.winddir }}'
+  - platform: mqtt
+    state_topic: 'v-station/sensor2'
+    name: "Väderstation regn senaste 15min"
+    unit_of_measurement: 'mm'
+    value_template: '{{ value_json.rain }}'
+  - platform: mqtt
+    state_topic: 'v-station/sensor1'
+    name: "Väderstation status"
+    value_template: '{{ value_json.status }}'

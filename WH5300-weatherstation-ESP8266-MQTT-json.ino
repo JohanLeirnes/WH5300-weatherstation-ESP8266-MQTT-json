@@ -20,6 +20,7 @@ Libraries :
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 
+//#define DEBUG
 #define MQTT_VERSION MQTT_VERSION_3_1_1
 
 ESP8266WebServer httpServer(80);
@@ -39,25 +40,28 @@ const char* MQTT_USER = "XXXX";
 const char* MQTT_PASSWORD = "XXXX";
 
 // MQTT: topic
-const char* MQTT_SENSOR_TOPIC = "v-station/sensor1";
+const char* MQTT_SENSOR_TOPIC = "v-station/sensor1"; //this is where all things except rain is reported
+const char* MQTT_SENSOR_TOPIC2 = "v-station/sensor2"; //this is where rain is reported
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
 unsigned long previousMillis = 0;
 unsigned long previousMillis2 = 0;
+unsigned long previousMillis3 = 0;
+unsigned long interval = 0;
+// Set the interval in times you want to skip measuring.
+// The weatherstation reports once every 48sec
 
 int pushButton = 14;
 boolean intro=0;
 boolean dataBuff[255];
+int datasent=0;
 byte byteArray[15];
 boolean ldataBuff[255]; //received bits buffer
-boolean firstcheckdone=0;
+int firstcheckdone=0;
+int firstraincheckdone=0;
 int lp;
-boolean DEBUG=1; //Set this flag to 0 for final upload
-
-// function called to publish the temperature and the humidity
-
 
 // function called when a MQTT message arrived
 void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
@@ -66,19 +70,19 @@ void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
-    if(DEBUG=1){
+    #if defined DEBUG
     Serial.print("INFO: Ansluter till MQTT servern...");
-  }
+    #endif
     if (client.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
-      if(DEBUG=1){
+      #if defined DEBUG
       Serial.println("INFO: ansluten");
-    }
+      #endif
     } else {
-      if(DEBUG=1){
+      #if defined DEBUG
       Serial.print("ERROR: gick ej ansluta, rc=");
       Serial.print(client.state());
       Serial.println("DEBUG: försöker igen om 5 sekunder");
-    }
+      #endif
       // Wait 5 seconds before retrying
       delay(5000);
     }
@@ -86,27 +90,32 @@ void reconnect() {
 }
 
 void setup() {
-  if(DEBUG=1){
+  #if defined DEBUG
   Serial.begin(9600);
-  }
+  #endif
   pinMode(pushButton, INPUT);
-  ESP.wdtDisable();
-  ESP.wdtEnable(WDTO_8S);
   delay(10);
-  if(DEBUG=1){
+  #if defined DEBUG
   Serial.println();
   Serial.println();
   Serial.print("INFO: Ansluter till ");
   Serial.println(WIFI_SSID);
-  }
+  #endif
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  if(DEBUG=1){
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    #if defined DEBUG
+    Serial.print(".");
+    #endif
+  }
+
+  #if defined DEBUG
   Serial.println("");
   Serial.println("INFO: WiFi ansluten");
   Serial.println("INFO: IP adress: ");
   Serial.println(WiFi.localIP());
-  }
+  #endif
 
   // init the MQTT connection
   client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
@@ -124,10 +133,26 @@ int  aux,id,hum,unk,status,dir;
 int p=0,b=0,i=0,j=0;
 static const char* const windDirections[] = {"N","NE","E","SE","S","SW","W","NW"};
 
+int crc8(boolean *BitString,int nBits)
+{
+        char CRC=0;
+        int  i;
+        boolean DoInvert;
+        for (i=0; i<nBits; ++i)
+        {
+                DoInvert = (BitString[i] ^ (CRC&0x80)>7);
+                if(DoInvert){
+                        CRC=CRC^0x18;
+                }
+                CRC=CRC<<1;
+                if(DoInvert){
+                        CRC=CRC|0x01;
+                }
+        }
+        return(CRC);
+}
+
 void decode(unsigned char byteArray[8]){
-  if(firstcheckdone=1){
-    rAcumold=rAcum;
-  }
   int type=(byteArray[0]&0xF0)>>4;
   switch (type){
           case 0x0A: //Weather message
@@ -147,11 +172,27 @@ void decode(unsigned char byteArray[8]){
                   dir=(byteArray[8]&0x0F)>>1;
                   break;
           default:
-                  //Serial.println("Unknown message: " + String(type));
+                  #if defined DEBUG
+                  Serial.println("Unknown message: " + String(type));
+                  #endif
+                  intro=1;
+                  p=0;
                   break;
   }
-  if(firstcheckdone=0){
+  if(firstcheckdone==0){
     rAcumold=rAcum;
+  }
+  if(firstcheckdone==0 && hum != 0){
+    firstcheckdone=1;
+    #if defined DEBUG
+    Serial.println("First check done");
+    #endif
+  }
+  if(firstraincheckdone==1){
+    rAcumold=rAcum;
+    #if defined DEBUG
+    #endif
+    firstraincheckdone=0;
   }
 }
 
@@ -167,52 +208,50 @@ void publishData(float temp,int hum,float wSpeed,float wGust,int dir,int status)
   root["windgust"] = (String)wGust;
   root["winddir"] = (String)windDirections[dir];
   root["status"] = (String)status;
-  if(DEBUG=1){
+  #if defined DEBUG
   Serial.println("Temperatur: " + String(temp) + " ºC");
   Serial.println("Luftfuktighet: " + String(hum) + " %");
   Serial.println("Vindhastighet: " + String(wSpeed) + " m/s");
   Serial.println("Vindbyar: " + String(wGust) + "m/s");
   Serial.println("Status bits: " + String(status));
   Serial.println("Vindriktning: " + String(windDirections[dir]));
-  }
+  #endif
   char data[200];
   root.printTo(data, root.measureLength() + 1);
   client.publish(MQTT_SENSOR_TOPIC, data, true);
+  datasent=1;
+  #if defined DEBUG
+  Serial.println("Data sent, taking a pause");
+  #endif
+  intro=1;
+  p=0;
+  #if defined DEBUG
+  Serial.println("p:" + String(p));
+  #endif
 }
 
-void publishDatarain(float temp,int hum,float wSpeed,float wGust,int dir,int status,float rAcumpub) {
+void publishDatarain(float rAcumpub) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
+  StaticJsonBuffer<200> jsonBuffer2;
+  JsonObject& root2 = jsonBuffer2.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
-  rAcumpub=rAcum-rAcumold;
-  root["temperature"] = (String)temp;
-  root["humidity"] = (String)hum;
-  root["wind"] = (String)wSpeed;
-  root["windgust"] = (String)wGust;
-  root["rain"] = (String)rAcumpub;
-  root["winddir"] = (String)windDirections[dir];
-  root["status"] = (String)status;
-  if(DEBUG=1){
-  Serial.println("Temperatur: " + String(temp) + " ºC");
-  Serial.println("Luftfuktighet: " + String(hum) + " %");
-  Serial.println("Vindhastighet: " + String(wSpeed) + " m/s");
-  Serial.println("Vindbyar: " + String(wGust) + "m/s");
-  Serial.println("Akumulerat regn: " + String(rAcum - rAcumold) + " mm");
-  Serial.println("Status bits: " + String(status));
-  Serial.println("Vindriktning: " + String(windDirections[dir]));
-  }
+  root2["rain"] = (String)rAcumpub;
+  #if defined DEBUG
+  Serial.println("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
+  #endif
   char data[200];
-  root.printTo(data, root.measureLength() + 1);
-  client.publish(MQTT_SENSOR_TOPIC, data, true);
+  root2.printTo(data, root2.measureLength() + 1);
+  client.publish(MQTT_SENSOR_TOPIC2, data, true);
+  #if defined DEBUG
+  Serial.println("First raincheck done:");
+  #endif
 }
 
 void loop() {
-  // Läs ingångspinnen :
-  ESP.wdtFeed();
+  if(datasent==0){
   int buttonState = digitalRead(pushButton);
-  if (buttonState != old) {  // skriva ut tillståndet för knappen:
+  if (buttonState != old) {
     if((old==1) && (micros() - dur)<800){
       dataBuff[p++]=1;
       intro=0;
@@ -222,34 +261,45 @@ void loop() {
     }
    old=buttonState;
    dur=micros();
-   if(p<=80){
-     return;
    }
-  }
   if((micros() - dur)>50000 && intro==0){
     if(p>80){
-      firstcheckdone=1;
+      #if defined DEBUG
+      Serial.println("p:" + String(p));
+      #endif
       lp=p;
-      memcpy(ldataBuff,dataBuff,sizeof(ldataBuff));
       b=0;
       for(i=(p-80);i<lp;i++){
-        byteArray[b]=byteArray[b]*2+ldataBuff[i];
+        byteArray[b]=byteArray[b]*2+dataBuff[i];
         if(((i-lp-80)+1)%8==0) {
           b++;
           byteArray[b]=0;
         }
       }
-      if(DEBUG=1){
+      #if defined DEBUG
       Serial.println();
-      Serial.print(b);
-      Serial.print(" bytes:");
-      for(j=0;j<b;j++){
-       printHex(byteArray[j],2);
-       Serial.print(" ");
+      #endif
+
+    if(crc8(&dataBuff[p-80],80)==0){ //CRC OK
+      unsigned long currentMillis = millis();
+      if(currentMillis - previousMillis2 >= 880000){
+        firstraincheckdone=1;
+        decode(byteArray);
       }
-      Serial.println();
+      else{
+        decode(byteArray);
       }
-      decode(byteArray);
+    }
+    else{
+       #if defined DEBUG
+       Serial.println("CRC Error");
+       #endif
+       p=0;
+       intro=1;
+       #if defined DEBUG
+       Serial.println("p after CRC check reset:" + String(p));
+       #endif
+       return;
     }
     if (!client.connected()) {
       reconnect();
@@ -259,23 +309,22 @@ void loop() {
     unsigned long currentMillis = millis();
     if(currentMillis - previousMillis2 >= 900000 && hum != 0) {
       previousMillis2 = currentMillis;
-      publishDatarain(temp, hum, wSpeed, wGust, dir, status, rAcumpub);
+      rAcumpub=rAcum-rAcumold;
+      publishDatarain(rAcumpub);
     }
-    else if(currentMillis - previousMillis >= 5000 && hum != 0){
+    if(currentMillis - previousMillis >= 5000 && hum != 0){
       previousMillis = currentMillis;
       publishData(temp, hum, wSpeed, wGust, dir, status);
+      }
     }
-    intro=1;
-    p=0;
   }
 }
-
-void printHex(int num, int precision) {
-     char tmp[16];
-     char format[128];
-
-     sprintf(format, "0x%%.%dX", precision);
-
-     sprintf(tmp, format, num);
-     Serial.print(tmp);
+  unsigned long currentMillis2 = millis();
+  if(currentMillis2 - previousMillis3 >= interval*48000 + 47500 && datasent == 1) {
+  #if defined DEBUG
+  Serial.println("Pause done, lets go again!");
+  previousMillis3 = currentMillis2;
+  #endif
+  datasent=0;
+  }
 }
