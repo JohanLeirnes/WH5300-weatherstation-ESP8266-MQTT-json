@@ -236,30 +236,10 @@ void publishDatarain(float rAcumpub) {
   StaticJsonBuffer<200> jsonBuffer2;
   JsonObject& root2 = jsonBuffer2.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
-<<<<<<< HEAD
   root2["rain"] = (String)rAcumpub;
   #if defined DEBUG
   Serial.println("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
   #endif
-=======
-  rAcumpub=rAcum-rAcumold;
-  root["temperature"] = (String)temp;
-  root["humidity"] = (String)hum;
-  root["wind"] = (String)wSpeed;
-  root["windgust"] = (String)wGust;
-  root["rain"] = (String)rAcumpub;
-  root["winddir"] = (String)windDirections[dir];
-  root["status"] = (String)status;
-  if(DEBUG=1){
-  Serial.println("Temperatur: " + String(temp) + " ºC");
-  Serial.println("Luftfuktighet: " + String(hum) + " %");
-  Serial.println("Vindhastighet: " + String(wSpeed) + " m/s");
-  Serial.println("Vindbyar: " + String(wGust) + "m/s");
-  Serial.println("Akumulerat regn: " + String(rAcumpub) + " mm");
-  Serial.println("Status bits: " + String(status));
-  Serial.println("Vindriktning: " + String(windDirections[dir]));
-  }
->>>>>>> origin/master
   char data[200];
   root2.printTo(data, root2.measureLength() + 1);
   client.publish(MQTT_SENSOR_TOPIC2, data, true);
