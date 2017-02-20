@@ -43,6 +43,14 @@ const char* MQTT_PASSWORD = "XXXX";
 const char* MQTT_SENSOR_TOPIC = "v-station/sensor1"; //this is where all things except rain is reported
 const char* MQTT_SENSOR_TOPIC2 = "v-station/sensor2"; //this is where rain is reported
 
+#ifdef DEBUG
+#define debug(x)     Serial.print(x)
+#define debugln(x)   Serial.println(x)
+#else
+#define debug(x)     // define empty, so macro does nothing
+#define debugln(x)
+#endif
+
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
@@ -70,19 +78,13 @@ void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
-    #if defined DEBUG
-    Serial.print("INFO: Ansluter till MQTT servern...");
-    #endif
+    debug("INFO: Ansluter till MQTT servern...");
     if (client.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
-      #if defined DEBUG
-      Serial.println("INFO: ansluten");
-      #endif
+      debugln("INFO: ansluten");
     } else {
-      #if defined DEBUG
-      Serial.print("ERROR: gick ej ansluta, rc=");
-      Serial.print(client.state());
-      Serial.println("DEBUG: försöker igen om 5 sekunder");
-      #endif
+      debug("ERROR: gick ej ansluta, rc=");
+      debug(client.state());
+      debugln("DEBUG: försöker igen om 5 sekunder");
       // Wait 5 seconds before retrying
       delay(5000);
     }
@@ -90,32 +92,24 @@ void reconnect() {
 }
 
 void setup() {
-  #if defined DEBUG
+  #ifdef DEBUG
   Serial.begin(9600);
   #endif
   pinMode(pushButton, INPUT);
   delay(10);
-  #if defined DEBUG
-  Serial.println();
-  Serial.println();
-  Serial.print("INFO: Ansluter till ");
-  Serial.println(WIFI_SSID);
-  #endif
+  debugln();
+  debugln();
+  debug("INFO: Ansluter till ");
+  debugln(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    #if defined DEBUG
-    Serial.print(".");
-    #endif
+    debug(".");
   }
-
-  #if defined DEBUG
-  Serial.println("");
-  Serial.println("INFO: WiFi ansluten");
-  Serial.println("INFO: IP adress: ");
-  Serial.println(WiFi.localIP());
-  #endif
+  debugln("");
+  debugln("INFO: WiFi ansluten");
+  debugln("INFO: IP adress: ");
+  debugln(WiFi.localIP());
 
   // init the MQTT connection
   client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
@@ -172,9 +166,7 @@ void decode(unsigned char byteArray[8]){
                   dir=(byteArray[8]&0x0F)>>1;
                   break;
           default:
-                  #if defined DEBUG
-                  Serial.println("Unknown message: " + String(type));
-                  #endif
+                  debugln("Unknown message: " + String(type));
                   intro=1;
                   p=0;
                   break;
@@ -185,14 +177,10 @@ void decode(unsigned char byteArray[8]){
   }
   if(firstcheckdone==0 && hum != 0){
     firstcheckdone=1;
-    #if defined DEBUG
-    Serial.println("First check done");
-    #endif
+    debugln("First check done");
   }
   if(firstraincheckdone==1){
     rAcumold=rAcum;
-    #if defined DEBUG
-    #endif
     firstraincheckdone=0;
   }
 }
@@ -209,26 +197,20 @@ void publishData(float temp,int hum,float wSpeed,float wGust,int dir,int status)
   root["windgust"] = String(wGust);
   root["winddir"] = String(windDirections[dir]);
   root["status"] = String(status);
-  #if defined DEBUG
-  Serial.println("Temperatur: " + String(temp) + " ºC");
-  Serial.println("Luftfuktighet: " + String(hum) + " %");
-  Serial.println("Vindhastighet: " + String(wSpeed) + " m/s");
-  Serial.println("Vindbyar: " + String(wGust) + "m/s");
-  Serial.println("Status bits: " + String(status));
-  Serial.println("Vindriktning: " + String(windDirections[dir]));
-  #endif
+  debugln("Temperatur: " + String(temp) + " ºC");
+  debugln("Luftfuktighet: " + String(hum) + " %");
+  debugln("Vindhastighet: " + String(wSpeed) + " m/s");
+  debugln("Vindbyar: " + String(wGust) + "m/s");
+  debugln("Status bits: " + String(status));
+  debugln("Vindriktning: " + String(windDirections[dir]));
   char data[200];
   root.printTo(data, root.measureLength() + 1);
   client.publish(MQTT_SENSOR_TOPIC, data, true);
   datasent=1;
-  #if defined DEBUG
-  Serial.println("Data sent, taking a pause");
-  #endif
+  debugln("Data sent, taking a pause");
   intro=1;
   p=0;
-  #if defined DEBUG
-  Serial.println("p:" + String(p));
-  #endif
+  debugln("p:" + String(p));
 }
 
 void publishDatarain(float rAcumpub) {
@@ -238,15 +220,11 @@ void publishDatarain(float rAcumpub) {
   JsonObject& root2 = jsonBuffer2.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root2["rain"] = String(rAcumpub);
-  #if defined DEBUG
-  Serial.println("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
-  #endif
+  debugln("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
   char data[200];
   root2.printTo(data, root2.measureLength() + 1);
   client.publish(MQTT_SENSOR_TOPIC2, data, true);
-  #if defined DEBUG
-  Serial.println("First raincheck done:");
-  #endif
+  debugln("First raincheck done:");
 }
 
 void loop() {
@@ -266,13 +244,9 @@ void loop() {
     }
   if(datasent == 0 && p > 80){
     if((micros() - dur)>50000 && intro==0){
-      #if defined DEBUG
-      Serial.println("p:" + String(p));
-      #endif
+      debugln("p:" + String(p));
       if(p>255){
-        #ifdef DEBUG
-        Serial.println("To much data, restarting loop!");
-        #endif
+        debugln("To much data, restarting loop!");
         p=0;
         intro=1;
         return;
@@ -286,10 +260,7 @@ void loop() {
           byteArray[b]=0;
         }
       }
-      #if defined DEBUG
-      Serial.println();
-      #endif
-
+      debugln();
     if(crc8(&dataBuff[p-80],80)==0){ //CRC OK
       unsigned long currentMillis = millis();
       if(currentMillis - previousMillis2 >= 880000){
@@ -301,14 +272,10 @@ void loop() {
       }
     }
     else{
-       #if defined DEBUG
-       Serial.println("CRC Error");
-       #endif
+       debugln("CRC Error");
        p=0;
        intro=1;
-       #if defined DEBUG
-       Serial.println("p after CRC check reset:" + String(p));
-       #endif
+       debugln("p after CRC check reset:" + String(p));
        return;
     }
     if (!client.connected()) {
@@ -330,10 +297,8 @@ void loop() {
 }
   unsigned long currentMillis2 = millis();
   if(currentMillis2 - previousMillis3 >= interval*48000 + 47500 && datasent == 1) {
-  #if defined DEBUG
-  Serial.println("Pause done, lets go again!");
+  debugln("Pause done, lets go again!");
   previousMillis3 = currentMillis2;
-  #endif
   datasent=0;
   }
 }
