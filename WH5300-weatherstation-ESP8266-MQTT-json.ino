@@ -130,7 +130,7 @@ int old;
 unsigned long dur;
 float temp,wSpeed,wGust,rAcum,rAcumold,rAcumpub;
 int  aux,id,hum,unk,status,dir;
-int p=0,b=0,i=0,j=0;
+int p=0,b=0,i=0;
 static const char* const windDirections[] = {"N","NE","E","SE","S","SW","W","NW"};
 
 int crc8(boolean *BitString,int nBits)
@@ -178,6 +178,7 @@ void decode(unsigned char byteArray[8]){
                   intro=1;
                   p=0;
                   break;
+
   }
   if(firstcheckdone==0){
     rAcumold=rAcum;
@@ -202,12 +203,12 @@ void publishData(float temp,int hum,float wSpeed,float wGust,int dir,int status)
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
-  root["temperature"] = (String)temp;
-  root["humidity"] = (String)hum;
-  root["wind"] = (String)wSpeed;
-  root["windgust"] = (String)wGust;
-  root["winddir"] = (String)windDirections[dir];
-  root["status"] = (String)status;
+  root["temperature"] = String(temp);
+  root["humidity"] = String(hum);
+  root["wind"] = String(wSpeed);
+  root["windgust"] = String(wGust);
+  root["winddir"] = String(windDirections[dir]);
+  root["status"] = String(status);
   #if defined DEBUG
   Serial.println("Temperatur: " + String(temp) + " ºC");
   Serial.println("Luftfuktighet: " + String(hum) + " %");
@@ -236,7 +237,7 @@ void publishDatarain(float rAcumpub) {
   StaticJsonBuffer<200> jsonBuffer2;
   JsonObject& root2 = jsonBuffer2.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
-  root2["rain"] = (String)rAcumpub;
+  root2["rain"] = String(rAcumpub);
   #if defined DEBUG
   Serial.println("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
   #endif
@@ -249,24 +250,33 @@ void publishDatarain(float rAcumpub) {
 }
 
 void loop() {
-  if(datasent==0){
   int buttonState = digitalRead(pushButton);
-  if (buttonState != old) {
-    if((old==1) && (micros() - dur)<800){
-      dataBuff[p++]=1;
-      intro=0;
-    }else if(old==1 && (micros() - dur)>=800){
-      dataBuff[p++]=0;
-      intro=0;
+  if(datasent == 0){
+    if (buttonState != old) {
+      if((old==1) && (micros() - dur)<800){
+        dataBuff[p++]=1;
+        intro=0;
+      }else if(old==1 && (micros() - dur)>=800){
+        dataBuff[p++]=0;
+        intro=0;
+      }
+      old=buttonState;
+      dur=micros();
+      }
     }
-   old=buttonState;
-   dur=micros();
-   }
-  if((micros() - dur)>50000 && intro==0){
-    if(p>80){
+  if(datasent == 0 && p > 80){
+    if((micros() - dur)>50000 && intro==0){
       #if defined DEBUG
       Serial.println("p:" + String(p));
       #endif
+      if(p>255){
+        #ifdef DEBUG
+        Serial.println("To much data, restarting loop!");
+        #endif
+        p=0;
+        intro=1;
+        return;
+      }
       lp=p;
       b=0;
       for(i=(p-80);i<lp;i++){
@@ -312,11 +322,10 @@ void loop() {
       rAcumpub=rAcum-rAcumold;
       publishDatarain(rAcumpub);
     }
-    if(currentMillis - previousMillis >= 5000 && hum != 0){
+    if(currentMillis - previousMillis >= 1000 && hum != 0){
       previousMillis = currentMillis;
       publishData(temp, hum, wSpeed, wGust, dir, status);
       }
-    }
   }
 }
   unsigned long currentMillis2 = millis();
