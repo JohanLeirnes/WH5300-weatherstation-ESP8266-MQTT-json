@@ -151,7 +151,7 @@ void decode(unsigned char byteArray[8]){
   switch (type){
           case 0x0A: //Weather message
                   //Getting the data
-                  id=((byteArray[0]&0x0F)<<4)+ ((byteArray[2]&0xF0)>>4);
+                  id=((byteArray[0]&0x0F)<<4)+ ((byteArray[1]&0xF0)>>4);
                   aux=((byteArray[1]&0x0F)<<8)+ ((byteArray[2]&0xFF));
                   temp=(aux*0.1)-40;
                   hum=byteArray[3];
@@ -242,7 +242,7 @@ void loop() {
       dur=micros();
       }
     }
-  if(datasent == 0 && p > 80){
+  if(datasent == 0 && p >= 80){
     if((micros() - dur)>50000 && intro==0){
       debugln("p:" + String(p));
       if(p>255){
