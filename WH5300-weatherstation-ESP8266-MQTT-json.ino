@@ -25,7 +25,7 @@ Libraries :
 
 ESP8266WebServer httpServer(80);
 ESP8266HTTPUpdateServer httpUpdater;
-
+int port = 23;
 
 // Wifi: SSID and password
 const char* host = "v-station-webupdate";
@@ -43,16 +43,19 @@ const char* MQTT_PASSWORD = "XXXX";
 const char* MQTT_SENSOR_TOPIC = "v-station/sensor1"; //this is where all things except rain is reported
 const char* MQTT_SENSOR_TOPIC2 = "v-station/sensor2"; //this is where rain is reported
 
-#ifdef DEBUG
+#ifdef SERIALDEBUG
 #define debug(x)     Serial.print(x)
 #define debugln(x)   Serial.println(x)
 #else
-#define debug(x)     // define empty, so macro does nothing
-#define debugln(x)
+#define debug(x)     Telnet.print(x)
+#define debugln(x)   Telnet.println(x)
 #endif
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
+
+WiFiServer TelnetServer(port);
+WiFiClient Telnet;
 
 unsigned long previousMillis = 0;
 unsigned long previousMillis2 = 0;
@@ -75,6 +78,26 @@ int lp;
 void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
 }
 
+void handleTelnet(){
+  if (TelnetServer.hasClient()){
+  	// client is connected
+    if (!Telnet || !Telnet.connected()){
+      if(Telnet) Telnet.stop();          // client disconnected
+      Telnet = TelnetServer.available(); // ready for new client
+    } else {
+      TelnetServer.available().stop();  // have client, block new conections
+    }
+  }
+  if (Telnet && Telnet.connected() && Telnet.available()){
+  // client input processing
+  while(Telnet.available())
+    Serial.write(Telnet.read()); // pass through
+    // do other stuff with client input here
+  }
+}
+
+
+
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
@@ -92,9 +115,9 @@ void reconnect() {
 }
 
 void setup() {
-  #ifdef DEBUG
-  Serial.begin(9600);
-  #endif
+  Serial.begin(115200);
+  TelnetServer.begin();
+  delay(100);
   pinMode(pushButton, INPUT);
   delay(10);
   debugln();
@@ -120,7 +143,7 @@ void setup() {
   httpServer.begin();
   MDNS.addService("http", "tcp", 80);
 }
-int old;
+int old,last;
 unsigned long dur;
 float temp,wSpeed,wGust,rAcum,rAcumold,rAcumpub;
 int  aux,id,hum,unk,status,dir;
@@ -134,7 +157,7 @@ int crc8(boolean *BitString,int nBits)
         boolean DoInvert;
         for (i=0; i<nBits; ++i)
         {
-                DoInvert = (BitString[i] ^ (CRC&0x80)>7);
+                DoInvert = (BitString[i] ^ (CRC&0x80)>>7);
                 if(DoInvert){
                         CRC=CRC^0x18;
                 }
@@ -228,15 +251,30 @@ void publishDatarain(float rAcumpub) {
 }
 
 void loop() {
+  handleTelnet();
   int buttonState = digitalRead(pushButton);
   if(datasent == 0){
     if (buttonState != old) {
-      if((old==1) && (micros() - dur)<800){
+      if((old==1) && (micros() - dur)<=800){
         dataBuff[p++]=1;
         intro=0;
-      }else if(old==1 && (micros() - dur)>=800){
+        /*if(last=0){
+        debugln(1);
+        }
+        else{
+          debug(1);
+        }
+        last=1;*/
+      }else if(old==1){
         dataBuff[p++]=0;
         intro=0;
+        /*if(last=1){
+        debugln(0);
+        }
+        else{
+          debug(0);
+        }
+        last=0;*/
       }
       old=buttonState;
       dur=micros();
@@ -244,7 +282,13 @@ void loop() {
     }
   if(datasent == 0 && p >= 80){
     if((micros() - dur)>50000 && intro==0){
+      debugln();
       debugln("p:" + String(p));
+      debugln();
+      /*for(int i = 0; i < p; i++)
+      {
+        debug(" " + String(dataBuff[i]) + " |");
+      }*/
       if(p>255){
         debugln("To much data, restarting loop!");
         p=0;
@@ -298,6 +342,7 @@ void loop() {
   unsigned long currentMillis2 = millis();
   if(currentMillis2 - previousMillis3 >= interval*48000 + 47500 && datasent == 1) {
   debugln("Pause done, lets go again!");
+  debugln("-------------------------------------------------------");
   previousMillis3 = currentMillis2;
   datasent=0;
   }
