@@ -66,10 +66,10 @@ unsigned long interval = 0;
 
 int pushButton = 14;
 boolean intro=0;
-boolean dataBuff[255];
+boolean dataBuff[500];
 int datasent=0;
 byte byteArray[15];
-boolean ldataBuff[255]; //received bits buffer
+boolean ldataBuff[500]; //received bits buffer
 int firstcheckdone=0;
 int firstraincheckdone=0;
 int lp;
@@ -244,9 +244,9 @@ void publishDatarain(float rAcumpub) {
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root2["rain"] = String(rAcumpub);
   debugln("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
-  char data[200];
-  root2.printTo(data, root2.measureLength() + 1);
-  client.publish(MQTT_SENSOR_TOPIC2, data, true);
+  char data2[200];
+  root2.printTo(data2, root2.measureLength() + 1);
+  client.publish(MQTT_SENSOR_TOPIC2, data2, true);
   debugln("First raincheck done:");
 }
 
@@ -254,32 +254,24 @@ void loop() {
   handleTelnet();
   int buttonState = digitalRead(pushButton);
   if(datasent == 0){
-    if (buttonState != old) {
+    if (buttonState != old && p < 500) {
       if((old==1) && (micros() - dur)<=800){
         dataBuff[p++]=1;
         intro=0;
-        /*if(last=0){
-        debugln(1);
-        }
-        else{
-          debug(1);
-        }
-        last=1;*/
       }else if(old==1){
         dataBuff[p++]=0;
         intro=0;
-        /*if(last=1){
-        debugln(0);
-        }
-        else{
-          debug(0);
-        }
-        last=0;*/
       }
       old=buttonState;
       dur=micros();
-      }
+    }else if(p >= 500){
+      debugln("To much data, restarting loop!");
+      p=0;
+      intro=1;
+      delay(1000);
+      return;
     }
+  }
   if(datasent == 0 && p >= 80){
     if((micros() - dur)>50000 && intro==0){
       debugln();
