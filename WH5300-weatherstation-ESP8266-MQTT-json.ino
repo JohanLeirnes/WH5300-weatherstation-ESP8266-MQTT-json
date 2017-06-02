@@ -20,7 +20,8 @@ Libraries :
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 
-//#define DEBUG
+#define SERIALDEBUG // Comment this out with a // for the final upload.
+
 #define MQTT_VERSION MQTT_VERSION_3_1_1
 
 ESP8266WebServer httpServer(80);
