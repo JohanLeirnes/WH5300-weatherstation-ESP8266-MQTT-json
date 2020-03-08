@@ -13,6 +13,8 @@ Libraries :
  modified by Laserlicht
 */
 
+//IMPORTANT: Board must be configured with SPIFFS before compiling and flashing!!!
+
 #include <FS.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
