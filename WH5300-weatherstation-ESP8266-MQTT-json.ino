@@ -394,19 +394,21 @@ void decode(unsigned char byteArray[8]){
   }
 }
 
-void publishData(float temp,int hum,float wSpeed,float wGust,int dir,int status) {
+void publishData(float temp,int hum, float rAcum, float wSpeed,float wGust,int dir,int status) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
   StaticJsonDocument<200> root;
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = String(temp);
   root["humidity"] = String(hum);
+  root["rainacum"] = String(rAcum);
   root["wind"] = String(wSpeed);
   root["windgust"] = String(wGust);
   root["winddir"] = String(windDirections[dir]);
   root["status"] = String(status);
   debugln("Temperatur: " + String(temp) + " ºC");
   debugln("Luftfuktighet: " + String(hum) + " %");
+  debugln("Rain (acum): " + String(rAcum) + " mm");
   debugln("Vindhastighet: " + String(wSpeed) + " m/s");
   debugln("Vindbyar: " + String(wGust) + "m/s");
   debugln("Status bits: " + String(status));
@@ -511,7 +513,7 @@ void loop() {
     }
     if(currentMillis - previousMillis >= 1000 && hum != 0){
       previousMillis = currentMillis;
-      publishData(temp, hum, wSpeed, wGust, dir, status);
+      publishData(temp, hum, rAcum, wSpeed, wGust, dir, status);
       }
   }
 }
