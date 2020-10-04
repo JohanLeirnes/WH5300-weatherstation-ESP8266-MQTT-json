@@ -9,7 +9,6 @@ Libraries :
  - DHT : https://github.com/adafruit/DHT-sensor-library
  - ArduinoJson : https://github.com/bblanchon/ArduinoJson
  - WiFiManager : https://github.com/tzapu/WiFiManager/releases
-
  modified by Laserlicht
 */
 
@@ -394,10 +393,10 @@ void decode(unsigned char byteArray[8]){
   }
 }
 
-void publishData(float temp,int hum, float rAcum, float wSpeed,float wGust,int dir,int status) {
+void publishData(float temp,int hum, float rAcum, float wSpeed,float wGust,int dir,int status,String bytes) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonDocument<200> root;
+  StaticJsonDocument<500> root;
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = String(temp);
   root["humidity"] = String(hum);
@@ -406,6 +405,7 @@ void publishData(float temp,int hum, float rAcum, float wSpeed,float wGust,int d
   root["windgust"] = String(wGust);
   root["winddir"] = String(windDirections[dir]);
   root["status"] = String(status);
+  root["bytes"] = bytes;
   debugln("Temperatur: " + String(temp) + " ºC");
   debugln("Luftfuktighet: " + String(hum) + " %");
   debugln("Rain (acum): " + String(rAcum) + " mm");
@@ -413,7 +413,7 @@ void publishData(float temp,int hum, float rAcum, float wSpeed,float wGust,int d
   debugln("Vindbyar: " + String(wGust) + "m/s");
   debugln("Status bits: " + String(status));
   debugln("Vindriktning: " + String(windDirections[dir]));
-  char data[200];
+  char data[500];
   serializeJson(root, data);
   client.publish(MQTT_SENSOR_TOPIC, data, true);
   datasent=1;
@@ -463,10 +463,6 @@ void loop() {
       debugln();
       debugln("p:" + String(p));
       debugln();
-      /*for(int i = 0; i < p; i++)
-      {
-        debug(" " + String(dataBuff[i]) + " |");
-      }*/
       if(p>255){
         debugln("To much data, restarting loop!");
         p=0;
@@ -475,6 +471,13 @@ void loop() {
       }
       lp=p;
       b=0;
+
+      String bytes = "";
+      for(i = 0; i < p; i++)
+      {
+        bytes += dataBuff[i] ? "1" : "0";
+      }
+
       for(i=(p-80);i<lp;i++){
         byteArray[b]=byteArray[b]*2+dataBuff[i];
         if(((i-lp-80)+1)%8==0) {
@@ -513,7 +516,7 @@ void loop() {
     }
     if(currentMillis - previousMillis >= 1000 && hum != 0){
       previousMillis = currentMillis;
-      publishData(temp, hum, rAcum, wSpeed, wGust, dir, status);
+      publishData(temp, hum, rAcum, wSpeed, wGust, dir, status, bytes);
       }
   }
 }
