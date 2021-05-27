@@ -1,17 +1,20 @@
 /*
 Created by Johan Lindström <johan.von.lindstrom@gmail.com>
-
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
 version 2 as published by the Free Software Foundation.
-
 Libraries :
  - ESP8266 core for Arduino : https://github.com/esp8266/Arduino
  - PubSubClient : https://github.com/knolleary/pubsubclient
  - DHT : https://github.com/adafruit/DHT-sensor-library
  - ArduinoJson : https://github.com/bblanchon/ArduinoJson
-
+ - WiFiManager : https://github.com/tzapu/WiFiManager/releases
+ modified by Laserlicht
 */
+
+//IMPORTANT: Board must be configured with SPIFFS before compiling and flashing!!!
+
+#include <FS.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
@@ -19,30 +22,38 @@ Libraries :
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
+#include <DNSServer.h>
+#include <ESP8266WebServer.h>
+#include <WiFiManager.h>  
 
 #define SERIALDEBUG // Comment this out with a // for the final upload.
 
 #define MQTT_VERSION MQTT_VERSION_3_1_1
+#define MQTT_MAX_PACKET_SIZE 512 //important change in header file
 
 ESP8266WebServer httpServer(80);
 ESP8266HTTPUpdateServer httpUpdater;
 int port = 23;
 
 // Wifi: SSID and password
-const char* host = "v-station-webupdate";
-const char* WIFI_SSID = "XXXXXX";
-const char* WIFI_PASSWORD = "XXXXX";
+const char* host = "Wetterstation-WH5300";
 
 // MQTT: ID, server IP, port, username and password
-const char* MQTT_CLIENT_ID = "v-station";
-const char* MQTT_SERVER_IP = "192.168.XXX.XXX";
-const uint16_t MQTT_SERVER_PORT = 1883;
-const char* MQTT_USER = "XXXX";
-const char* MQTT_PASSWORD = "XXXX";
+// Disable Wifi-Access-Point & Restart Device to reconfigure
+char MQTT_CLIENT_ID[40] = "v-station";
+char MQTT_SERVER_IP[20] = "192.168.XXX.XXX";
+char MQTT_SERVER_PORT[6] = "1883";
+char MQTT_USER[40] = "XXXX";
+char MQTT_PASSWORD[40] = "XXXX";
 
 // MQTT: topic
-const char* MQTT_SENSOR_TOPIC = "v-station/sensor1"; //this is where all things except rain is reported
-const char* MQTT_SENSOR_TOPIC2 = "v-station/sensor2"; //this is where rain is reported
+char MQTT_SENSOR_TOPIC[100] = "v-station/sensor1"; //this is where all things except rain is reported
+char MQTT_SENSOR_TOPIC2[100] = "v-station/sensor2"; //this is where rain is reported
+
+//IP
+char static_ip[16] = "10.0.1.56";
+char static_gw[16] = "10.0.1.1";
+char static_sn[16] = "255.255.255.0";
 
 #ifdef SERIALDEBUG
 #define debug(x)     Serial.print(x)
@@ -75,6 +86,176 @@ int firstcheckdone=0;
 int firstraincheckdone=0;
 int lp;
 
+
+
+
+
+//WiFiManager
+//flag for saving data
+bool shouldSaveConfig = false;
+
+//callback notifying us of the need to save config
+void saveConfigCallback () {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
+
+void init_wifimanager() {
+  //clean FS, for testing
+  //SPIFFS.format();
+
+  //read configuration from FS json
+  Serial.println("mounting FS...");
+
+  if (SPIFFS.begin()) {
+    Serial.println("mounted file system");
+    if (SPIFFS.exists("/config.json")) {
+      //file exists, reading and loading
+      Serial.println("reading config file");
+      File configFile = SPIFFS.open("/config.json", "r");
+      if (configFile) {
+        Serial.println("opened config file");
+        size_t size = configFile.size();
+        // Allocate a buffer to store contents of the file.
+        std::unique_ptr<char[]> buf(new char[size]);
+
+        configFile.readBytes(buf.get(), size);
+        DynamicJsonDocument json(1024);
+        auto error = deserializeJson(json, buf.get());
+        serializeJson(json, Serial);
+        if (!error) {
+          Serial.println("\nparsed json");
+
+          strcpy(MQTT_CLIENT_ID, json["MQTT_CLIENT_ID"]);
+          strcpy(MQTT_SERVER_IP, json["MQTT_SERVER_IP"]);
+          strcpy(MQTT_SERVER_PORT, json["MQTT_SERVER_PORT"]);
+          strcpy(MQTT_USER, json["MQTT_USER"]);
+          strcpy(MQTT_PASSWORD, json["MQTT_PASSWORD"]);
+          strcpy(MQTT_SENSOR_TOPIC, json["MQTT_SENSOR_TOPIC"]);
+          strcpy(MQTT_SENSOR_TOPIC2, json["MQTT_SENSOR_TOPIC2"]);
+
+          if(json["ip"]) {
+            strcpy(static_ip, json["ip"]);
+            strcpy(static_gw, json["gateway"]);
+            strcpy(static_sn, json["subnet"]);
+          }
+
+        } else {
+          Serial.println("failed to load json config");
+        }
+        configFile.close();
+      }
+    }
+  } else {
+    Serial.println("failed to mount FS");
+  }
+  //end read
+
+
+
+  // The extra parameters to be configured (can be either global or just in the setup)
+  // After connecting, parameter.getValue() will get you the configured value
+  // id/name placeholder/prompt default length
+  WiFiManagerParameter custom_MQTT_CLIENT_ID("id", "client id", MQTT_CLIENT_ID, 40);
+  WiFiManagerParameter custom_MQTT_SERVER_IP("mqttip", "server ip", MQTT_SERVER_IP, 20);
+  WiFiManagerParameter custom_MQTT_SERVER_PORT("port", "server port", MQTT_SERVER_PORT, 6);
+  WiFiManagerParameter custom_MQTT_USER("user", "user", MQTT_USER, 40);
+  WiFiManagerParameter custom_MQTT_PASSWORD("password", "password", MQTT_PASSWORD, 40);
+  WiFiManagerParameter custom_MQTT_SENSOR_TOPIC("topic", "topic", MQTT_SENSOR_TOPIC, 100);
+  WiFiManagerParameter custom_MQTT_SENSOR_TOPIC2("topic2", "topic2", MQTT_SENSOR_TOPIC2, 100);
+
+  //WiFiManager
+  //Local intialization. Once its business is done, there is no need to keep it around
+  WiFiManager wifiManager;
+
+  //set config save notify callback
+  wifiManager.setSaveConfigCallback(saveConfigCallback);
+
+  //set static ip
+  IPAddress _ip,_gw,_sn;
+  _ip.fromString(static_ip);
+  _gw.fromString(static_gw);
+  _sn.fromString(static_sn);
+
+  wifiManager.setSTAStaticIPConfig(_ip, _gw, _sn);
+
+  //add all your parameters here
+  wifiManager.addParameter(&custom_MQTT_CLIENT_ID);
+  wifiManager.addParameter(&custom_MQTT_SERVER_IP);
+  wifiManager.addParameter(&custom_MQTT_SERVER_PORT);
+  wifiManager.addParameter(&custom_MQTT_USER);
+  wifiManager.addParameter(&custom_MQTT_PASSWORD);
+  wifiManager.addParameter(&custom_MQTT_SENSOR_TOPIC);
+  wifiManager.addParameter(&custom_MQTT_SENSOR_TOPIC2);
+ 
+
+  //reset settings - for testing
+  //wifiManager.resetSettings();
+
+  //set minimu quality of signal so it ignores AP's under that quality
+  //defaults to 8%
+  //wifiManager.setMinimumSignalQuality();
+  
+  //sets timeout until configuration portal gets turned off
+  //useful to make it all retry or go to sleep
+  //in seconds
+  //wifiManager.setTimeout(120);
+
+  //fetches ssid and pass and tries to connect
+  //if it does not connect it starts an access point with the specified name
+  //here  "AutoConnectAP"
+  //and goes into a blocking loop awaiting configuration
+  if (!wifiManager.autoConnect("WeatherStationAP")) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    //reset and try again, or maybe put it to deep sleep
+    ESP.reset();
+    delay(5000);
+  }
+
+  //if you get here you have connected to the WiFi
+  Serial.println("connected...yeey :)");
+
+  //read updated parameters
+  strcpy(MQTT_CLIENT_ID, custom_MQTT_CLIENT_ID.getValue());
+  strcpy(MQTT_SERVER_IP, custom_MQTT_SERVER_IP.getValue());
+  strcpy(MQTT_SERVER_PORT, custom_MQTT_SERVER_PORT.getValue());
+  strcpy(MQTT_USER, custom_MQTT_USER.getValue());
+  strcpy(MQTT_PASSWORD, custom_MQTT_PASSWORD.getValue());
+  strcpy(MQTT_SENSOR_TOPIC, custom_MQTT_SENSOR_TOPIC.getValue());
+  strcpy(MQTT_SENSOR_TOPIC2, custom_MQTT_SENSOR_TOPIC2.getValue());
+
+  //save the custom parameters to FS
+  if (shouldSaveConfig) {
+    Serial.println("saving config");
+    DynamicJsonDocument json(1024);
+    json["MQTT_CLIENT_ID"] = MQTT_CLIENT_ID;
+    json["MQTT_SERVER_IP"] = MQTT_SERVER_IP;
+    json["MQTT_SERVER_PORT"] = MQTT_SERVER_PORT;
+    json["MQTT_USER"] = MQTT_USER;
+    json["MQTT_PASSWORD"] = MQTT_PASSWORD;
+    json["MQTT_SENSOR_TOPIC"] = MQTT_SENSOR_TOPIC;
+    json["MQTT_SENSOR_TOPIC2"] = MQTT_SENSOR_TOPIC2;
+
+    json["ip"] = WiFi.localIP().toString();
+    json["gateway"] = WiFi.gatewayIP().toString();
+    json["subnet"] = WiFi.subnetMask().toString();
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile) {
+      Serial.println("failed to open config file for writing");
+    }
+
+    serializeJson(json, Serial);
+    serializeJson(json, configFile);
+    configFile.close();
+    //end save
+  }
+}
+
+
+
+
 // function called when a MQTT message arrived
 void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
 }
@@ -103,7 +284,11 @@ void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
     debug("INFO: Ansluter till MQTT servern...");
-    if (client.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
+    const char* user = MQTT_USER;
+    const char* password = MQTT_PASSWORD;
+    if(user=="none") user = NULL;
+    if(password=="none") password = NULL;
+    if (client.connect(MQTT_CLIENT_ID, user, password)) {
       debugln("INFO: ansluten");
     } else {
       debug("ERROR: gick ej ansluta, rc=");
@@ -124,8 +309,7 @@ void setup() {
   debugln();
   debugln();
   debug("INFO: Ansluter till ");
-  debugln(WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  init_wifimanager();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     debug(".");
@@ -136,7 +320,7 @@ void setup() {
   debugln(WiFi.localIP());
 
   // init the MQTT connection
-  client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
+  client.setServer(MQTT_SERVER_IP, atoi(MQTT_SERVER_PORT));
   client.setCallback(callback);
 
   MDNS.begin(host);
@@ -209,26 +393,28 @@ void decode(unsigned char byteArray[8]){
   }
 }
 
-void publishData(float temp,int hum,float wSpeed,float wGust,int dir,int status) {
+void publishData(float temp,int hum, float rAcum, float wSpeed,float wGust,int dir,int status,String bytes) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
+  StaticJsonDocument<500> root;
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = String(temp);
   root["humidity"] = String(hum);
+  root["rainacum"] = String(rAcum);
   root["wind"] = String(wSpeed);
   root["windgust"] = String(wGust);
   root["winddir"] = String(windDirections[dir]);
   root["status"] = String(status);
+  root["bytes"] = bytes;
   debugln("Temperatur: " + String(temp) + " ºC");
   debugln("Luftfuktighet: " + String(hum) + " %");
+  debugln("Rain (acum): " + String(rAcum) + " mm");
   debugln("Vindhastighet: " + String(wSpeed) + " m/s");
   debugln("Vindbyar: " + String(wGust) + "m/s");
   debugln("Status bits: " + String(status));
   debugln("Vindriktning: " + String(windDirections[dir]));
-  char data[200];
-  root.printTo(data, root.measureLength() + 1);
+  char data[500];
+  serializeJson(root, data);
   client.publish(MQTT_SENSOR_TOPIC, data, true);
   datasent=1;
   debugln("Data sent, taking a pause");
@@ -240,13 +426,12 @@ void publishData(float temp,int hum,float wSpeed,float wGust,int dir,int status)
 void publishDatarain(float rAcumpub) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonBuffer<200> jsonBuffer2;
-  JsonObject& root2 = jsonBuffer2.createObject();
+  StaticJsonDocument<200> root2;
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root2["rain"] = String(rAcumpub);
   debugln("Regn senaste 15minuter: " + String(rAcumpub) + " mm");
   char data2[200];
-  root2.printTo(data2, root2.measureLength() + 1);
+  serializeJson(root2, data2);
   client.publish(MQTT_SENSOR_TOPIC2, data2, true);
   debugln("First raincheck done:");
 }
@@ -265,23 +450,19 @@ void loop() {
       }
       old=buttonState;
       dur=micros();
-    }else if(p >= 500){
-      debugln("To much data, restarting loop!");
+    }else if(p >= 500||(micros() - dur)>=10000){
+      //debugln("To much data, restarting loop!");
       p=0;
       intro=1;
-      delay(1000);
+      //delay(1000);
       return;
     }
   }
   if(datasent == 0 && p >= 80){
-    if((micros() - dur)>50000 && intro==0){
+    if((micros() - dur)>5000 && intro==0){
       debugln();
       debugln("p:" + String(p));
       debugln();
-      /*for(int i = 0; i < p; i++)
-      {
-        debug(" " + String(dataBuff[i]) + " |");
-      }*/
       if(p>255){
         debugln("To much data, restarting loop!");
         p=0;
@@ -290,6 +471,13 @@ void loop() {
       }
       lp=p;
       b=0;
+
+      String bytes = "";
+      for(i = 0; i < p; i++)
+      {
+        bytes += dataBuff[i] ? "1" : "0";
+      }
+
       for(i=(p-80);i<lp;i++){
         byteArray[b]=byteArray[b]*2+dataBuff[i];
         if(((i-lp-80)+1)%8==0) {
@@ -328,7 +516,7 @@ void loop() {
     }
     if(currentMillis - previousMillis >= 1000 && hum != 0){
       previousMillis = currentMillis;
-      publishData(temp, hum, wSpeed, wGust, dir, status);
+      publishData(temp, hum, rAcum, wSpeed, wGust, dir, status, bytes);
       }
   }
 }
